@@ -84,7 +84,7 @@ class RAGEngine:
         """Load a URL and return documents + metadata."""
         loader = WebBaseLoader(
             web_paths=[url],
-            bs_kwargs={"features": "lxml"},
+            bs_kwargs={"features": "html.parser"},
         )
         documents = loader.load()
         # Tag every chunk with the URL as source
