@@ -1,4 +1,6 @@
 import os
+from queue import Queue
+from threading import Thread
 from typing import List, Tuple, Optional, Iterator
 
 import trafilatura
@@ -7,12 +9,11 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_groq import ChatGroq
-from langchain.chains import ConversationalRetrievalChain
-from langchain.memory import ConversationBufferMemory
-from langchain.prompts import ChatPromptTemplate
+from langchain_classic.chains import ConversationalRetrievalChain
+from langchain_classic.memory import ConversationBufferMemory
+from langchain_classic.prompts import ChatPromptTemplate
 from langchain_core.documents import Document
-from langchain_core.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
-from langchain_core.callbacks import CallbackManager
+from langchain_core.callbacks import BaseCallbackHandler
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -44,6 +45,22 @@ Chat History:
     ),
     ("human", "{question}"),
 ])
+
+
+class StreamingCallbackHandler(BaseCallbackHandler):
+    """Collects LLM tokens into a thread-safe Queue for real-time streaming."""
+
+    def __init__(self):
+        self.queue = Queue()
+
+    def on_llm_new_token(self, token: str, **kwargs) -> None:
+        self.queue.put(token)
+
+    def on_llm_end(self, response, **kwargs) -> None:
+        self.queue.put(None)
+
+    def on_llm_error(self, error, **kwargs) -> None:
+        self.queue.put(None)
 
 
 class RAGEngine:
@@ -195,20 +212,21 @@ class RAGEngine:
 
     def stream(self, question: str) -> Tuple[Iterator[str], List[Document]]:
         """
-        Returns a generator that yields answer tokens one by one, plus the
-        source documents after the stream completes.
+        Returns a generator that yields answer tokens in real time via
+        LangChain callbacks plus the source documents used.
 
         Usage in Streamlit:
             tokens, sources = engine.stream(question)
-            for token in tokens:
-                # update placeholder with each token
+            st.write_stream(tokens)
         """
         if not self.chain:
             def _err():
                 yield "⚠️ No document loaded. Please upload a PDF or enter a URL first."
             return _err(), []
 
-        # Retrieve source docs first so we can show them before/during streaming
+        handler = StreamingCallbackHandler()
+
+        # Retrieve source docs up front so they're available immediately
         retriever = self.vectorstore.as_retriever(
             search_type="mmr",
             search_kwargs={"k": 5, "fetch_k": 12},
@@ -217,13 +235,21 @@ class RAGEngine:
         unique_sources = self._deduplicate_sources(raw_sources)
 
         def _token_generator():
-            result = self.chain.invoke({"question": question})
-            # When streaming=True on the LLM, invoke() still returns the full
-            # result but also fires callbacks. For Streamlit we use the full
-            # result and yield it in one shot here; true token streaming
-            # requires Streamlit's st.write_stream with an async generator,
-            # which is shown in the UI layer below.
-            yield result["answer"]
+            # Run chain.invoke in a background thread so the callback handler
+            # can feed tokens into the queue as the LLM produces them.
+            thread = Thread(target=lambda: self.chain.invoke(
+                {"question": question},
+                callbacks=[handler],
+            ))
+            thread.start()
+
+            while True:
+                token = handler.queue.get()
+                if token is None:
+                    break
+                yield token
+
+            thread.join()
 
         return _token_generator(), unique_sources
 

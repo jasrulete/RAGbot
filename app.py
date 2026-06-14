@@ -230,27 +230,14 @@ if prompt := st.chat_input("Ask a question about your document…"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        # ── Streaming response ─────────────────────────────────────────
-        # We show a live cursor (▌) while tokens arrive so the UI never
-        # feels frozen, even on long answers.
-        placeholder = st.empty()
-        full_answer = ""
-
         with st.spinner("Searching document…"):
             token_gen, sources = engine.stream(prompt)
 
-        # Stream tokens into the placeholder
-        for token in token_gen:
-            full_answer += token
-            placeholder.markdown(full_answer + "▌")
+        full_answer = st.write_stream(token_gen)
 
-        # Replace the streaming cursor with the final clean answer
-        placeholder.markdown(full_answer)
-
-        # Show retrieved source cards below the answer
         if sources:
             with st.expander(f"📄 {len(sources)} source(s) used"):
-                render_sources(sources)  # ← same function, no duplication
+                render_sources(sources)
 
     # Persist the completed message (including sources) in history
     st.session_state.messages.append({
