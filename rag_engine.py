@@ -35,7 +35,6 @@ class RAGEngine:
             chunk_size=1000,
             chunk_overlap=200,
         )
-        self.chroma_client = chromadb.EphemeralClient()
         self.vectorstore: Optional[Chroma] = None
         self.chain = None
         self.chat_history: List = []
@@ -79,11 +78,7 @@ class RAGEngine:
 
         chunks = self.text_splitter.split_documents(documents)
 
-        try:
-            self.chroma_client.delete_collection("rag_docs")
-        except Exception:
-            pass
-
+        self.chroma_client = chromadb.EphemeralClient()
         self.vectorstore = Chroma.from_documents(
             documents=chunks,
             embedding=self.embeddings,
