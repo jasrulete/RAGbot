@@ -1,4 +1,5 @@
 import os
+import shutil
 import tempfile
 from typing import List, Tuple, Optional
 
@@ -35,6 +36,7 @@ class RAGEngine:
             chunk_size=1000,
             chunk_overlap=200,
         )
+        self.chroma_dir: Optional[str] = None
         self.vectorstore: Optional[Chroma] = None
         self.chain = None
         self.chat_history: List = []
@@ -78,7 +80,11 @@ class RAGEngine:
 
         chunks = self.text_splitter.split_documents(documents)
 
-        self.chroma_client = chromadb.EphemeralClient()
+        if self.chroma_dir and os.path.isdir(self.chroma_dir):
+            shutil.rmtree(self.chroma_dir, ignore_errors=True)
+        self.chroma_dir = tempfile.mkdtemp(prefix="ragbot_chroma_")
+
+        self.chroma_client = chromadb.PersistentClient(path=self.chroma_dir)
         self.vectorstore = Chroma.from_documents(
             documents=chunks,
             embedding=self.embeddings,
@@ -198,6 +204,9 @@ class RAGEngine:
     def clear(self):
         if self.vectorstore:
             self.vectorstore.delete_collection()
+        if self.chroma_dir and os.path.isdir(self.chroma_dir):
+            shutil.rmtree(self.chroma_dir, ignore_errors=True)
+        self.chroma_dir = None
         self.vectorstore = None
         self.chain = None
         self.chat_history = []
