@@ -6,6 +6,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
+import chromadb
 from langchain_groq import ChatGroq
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
@@ -34,6 +35,7 @@ class RAGEngine:
             chunk_size=1000,
             chunk_overlap=200,
         )
+        self.chroma_client = chromadb.EphemeralClient()
         self.vectorstore: Optional[Chroma] = None
         self.chain = None
         self.chat_history: List = []
@@ -77,10 +79,16 @@ class RAGEngine:
 
         chunks = self.text_splitter.split_documents(documents)
 
+        try:
+            self.chroma_client.delete_collection("rag_docs")
+        except Exception:
+            pass
+
         self.vectorstore = Chroma.from_documents(
             documents=chunks,
             embedding=self.embeddings,
             collection_name="rag_docs",
+            client=self.chroma_client,
         )
 
         retriever = self.vectorstore.as_retriever(
