@@ -150,6 +150,43 @@ class RAGEngine:
 
         return answer, unique_sources
 
+    def stream(self, question: str):
+        if not self.chain:
+            def _empty():
+                yield "⚠️ No document loaded. Please upload a PDF or enter a URL first."
+            return _empty(), []
+
+        chunks = list(self.chain.stream({
+            "input": question,
+            "chat_history": self.chat_history,
+        }))
+
+        sources = []
+        for c in chunks:
+            if "context" in c:
+                sources = c["context"]
+                break
+
+        answer = "".join(c["answer"] for c in chunks if "answer" in c)
+
+        self.chat_history.append(HumanMessage(content=question))
+        self.chat_history.append(AIMessage(content=answer))
+
+        seen = set()
+        unique_sources = []
+        for s in sources:
+            key = (s.metadata.get("page_display"), s.metadata.get("source", ""))
+            if key not in seen:
+                seen.add(key)
+                unique_sources.append(s)
+
+        def _token_gen():
+            for c in chunks:
+                if "answer" in c:
+                    yield c["answer"]
+
+        return _token_gen(), unique_sources
+
     # ── Utils ──────────────────────────────────────────────────────────────
 
     def is_ready(self) -> bool:
